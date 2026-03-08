@@ -1,0 +1,83 @@
+/* EVE Trade Tools EVE Login — frontend styles */
+
+.ett-el-button {
+    display: inline-block;
+    line-height: 0;
+}
+
+.ett-el-button img {
+    height: 38px;
+    width: auto;
+    display: block;
+}
+
+/* Text fallback when eve-sso.png is not present */
+.ett-el-text-button {
+    display: inline-block;
+    line-height: 1;
+    padding: 9px 16px;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 13px;
+    font-family: sans-serif;
+    border-radius: 3px;
+}
+
+/* wp-login.php injection */
+.ett-el-login-wrap {
+    margin: 16px 0 0;
+    text-align: center;
+}
+
+.ett-el-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 14px;
+    color: #72777c;
+    font-size: 13px;
+}
+
+.ett-el-divider::before,
+.ett-el-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid #dcdcde;
+}
+
+/* Shortcode wrappers */
+.ett-el-shortcode-wrap {
+    display: inline-block;
+}
+
+.ett-el-linked {
+    display: inline-block;
+}
+
+.ett-el-linked p {
+    margin: 0 0 8px;
+}
+
+.ett-el-unlink-btn {
+    font-size: 0.85em;
+    color: #d63638;
+}
+
+/* Notices */
+.ett-el-notice {
+    font-style: italic;
+}
+
+/* User profile page (wp-admin) */
+.ett-el-unlink-btn.button {
+    color: #d63638;
+    border-color: #d63638;
+    margin-top: 6px;
+}
+
+.ett-el-unlink-btn.button:hover {
+    color: #fff;
+    background: #d63638;
+    border-color: #d63638;
+}
+
