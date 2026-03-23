@@ -14,6 +14,11 @@ final class ETT_EL_OAuth {
      */
 
     public static function init(): void {
+        // AJAX endpoint for generating state tokens on demand (prevents speculative
+        // page loads from burning a token before the user actually clicks).
+        add_action('wp_ajax_nopriv_ett_el_get_auth_url', [__CLASS__, 'ajax_get_auth_url']);
+        add_action('wp_ajax_ett_el_get_auth_url',        [__CLASS__, 'ajax_get_auth_url']);
+
         // Callback accessible to logged-out visitors (login/register flow).
         add_action('admin_post_nopriv_ett_el_callback', [__CLASS__, 'handle_callback']);
         // Callback for logged-in users (link flow).
@@ -48,6 +53,49 @@ final class ETT_EL_OAuth {
 
     public static function enqueue_assets(): void {
         wp_enqueue_style('ett-el-frontend', ETT_EL_URL . 'assets/frontend.css', [], ETT_EL_VERSION);
+
+        // Intercept EVE SSO button clicks and fetch a fresh auth URL via AJAX
+        // immediately before navigating. This prevents speculative/prefetch page
+        // loads from generating (and orphaning) state tokens at render time.
+        $nonce = wp_create_nonce('ett_el_get_auth_url');
+        wp_add_inline_script('jquery', "
+            (function() {
+                var ajaxUrl  = " . wp_json_encode(admin_url('admin-ajax.php')) . ";
+                var nonce    = " . wp_json_encode($nonce) . ";
+
+                document.addEventListener('click', function(e) {
+                    var btn = e.target.closest('a.ett-el-button[data-ett-mode]');
+                    if (!btn) return;
+
+                    e.preventDefault();
+                    btn.style.opacity = '0.6';
+                    btn.style.pointerEvents = 'none';
+
+                    var fd = new FormData();
+                    fd.append('action',       'ett_el_get_auth_url');
+                    fd.append('nonce',        nonce);
+                    fd.append('mode',         btn.dataset.ettMode);
+                    fd.append('redirect_url', btn.dataset.ettRedirect || '');
+
+                    fetch(ajaxUrl, { method: 'POST', body: fd })
+                        .then(function(r) { return r.json(); })
+                        .then(function(json) {
+                            if (json.success && json.data && json.data.url) {
+                                window.location.href = json.data.url;
+                            } else {
+                                btn.style.opacity = '';
+                                btn.style.pointerEvents = '';
+                                alert('EVE SSO: could not generate login URL. Please try again.');
+                            }
+                        })
+                        .catch(function() {
+                            btn.style.opacity = '';
+                            btn.style.pointerEvents = '';
+                            alert('EVE SSO: network error. Please try again.');
+                        });
+                }, true);
+            })();
+        ");
     }
 
     public static function enqueue_login_mover(): void {
@@ -60,6 +108,25 @@ final class ETT_EL_OAuth {
                 if (wrap && form) form.insertBefore(wrap, form.firstChild);
             });
         ");
+    }
+
+    /**
+     * AJAX handler — generates a fresh state token on demand and returns the
+     * EVE SSO auth URL. Called just before the browser navigates, so speculative
+     * page loads never burn a token prematurely.
+     */
+    public static function ajax_get_auth_url(): void {
+        check_ajax_referer('ett_el_get_auth_url', 'nonce');
+
+        $mode         = isset($_POST['mode']) && $_POST['mode'] === 'link' ? 'link' : 'login';
+        $redirect_url = isset($_POST['redirect_url']) ? esc_url_raw(wp_unslash($_POST['redirect_url'])) : home_url('/');
+
+        [$client_id] = self::get_credentials();
+        if ($client_id === '') {
+            wp_send_json_error('not_configured', 400);
+        }
+
+        wp_send_json_success(['url' => self::build_auth_url($mode, $redirect_url)]);
     }
 
     public static function enqueue_profile_assets(string $hook): void {
@@ -77,7 +144,7 @@ final class ETT_EL_OAuth {
         $character_name = $character_id !== '' ? self::get_character_name_for($user->ID, $character_id) : '';
         $linked         = $character_id !== '';
 
-        $link_url   = $client_id !== '' ? self::build_auth_url('link', admin_url('profile.php')) : '';
+        $link_redirect = admin_url('profile.php');
         $unlink_url = wp_nonce_url(
             admin_url('admin-post.php?action=ett_el_unlink'),
             'ett_el_unlink_' . $user->ID
@@ -96,7 +163,7 @@ final class ETT_EL_OAuth {
                         <a href="<?php echo esc_url($unlink_url); ?>" class="ett-el-unlink-btn button">Unlink character</a>
                     <?php elseif ($client_id !== '') : ?>
                         <p class="description">No EVE character linked. Connect one to enable EVE SSO login.</p>
-                        <?php echo self::button_html($link_url, 'Link EVE Character'); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                        <?php echo self::button_html('link', $link_redirect, 'Link EVE Character'); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                     <?php else : ?>
                         <p class="description">EVE Login is not configured. Contact the site administrator.</p>
                     <?php endif; ?>
@@ -149,13 +216,17 @@ final class ETT_EL_OAuth {
 
     // ── Button HTML ───────────────────────────────────────────────────────────
 
-    private static function button_html(string $auth_url, string $label = 'Log in with EVE Online'): string {
+    private static function button_html(string $mode, string $redirect_url, string $label = 'Log in with EVE Online'): string {
         $img_path     = ETT_EL_PATH . 'assets/eve-sso.png';
         $button_inner = file_exists($img_path)
             ? '<img src="' . esc_url(ETT_EL_URL . 'assets/eve-sso.png') . '" alt="' . esc_attr($label) . '" />'
             : '<span class="ett-el-text-button">' . esc_html($label) . '</span>';
 
-        return '<a href="' . esc_url($auth_url) . '" class="ett-el-button">' . $button_inner . '</a>';
+        return '<a href="#"'
+             . ' class="ett-el-button"'
+             . ' data-ett-mode="'     . esc_attr($mode)         . '"'
+             . ' data-ett-redirect="' . esc_attr($redirect_url) . '"'
+             . '>' . $button_inner . '</a>';
     }
 
     // ── wp-login.php injection ────────────────────────────────────────────────
@@ -166,10 +237,9 @@ final class ETT_EL_OAuth {
 
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $redirect_to = esc_url_raw(wp_unslash($_REQUEST['redirect_to'] ?? admin_url()));
-        $auth_url    = self::build_auth_url('login', $redirect_to);
 
         echo '<div class="ett-el-login-wrap">';
-        echo self::button_html($auth_url); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        echo self::button_html('login', $redirect_to); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
         echo '<p class="ett-el-divider"><span>or</span></p>';
         echo '</div>';
     }
@@ -189,8 +259,8 @@ final class ETT_EL_OAuth {
             return '<p class="ett-el-notice">EVE Login is not configured yet.</p>';
         }
 
-        $auth_url = self::build_auth_url('login', get_permalink() ?: home_url('/'));
-        return '<div class="ett-el-shortcode-wrap">' . self::button_html($auth_url) . '</div>';
+        $redirect = get_permalink() ?: home_url('/');
+        return '<div class="ett-el-shortcode-wrap">' . self::button_html('login', $redirect) . '</div>';
     }
 
     /**
@@ -230,9 +300,9 @@ final class ETT_EL_OAuth {
                  . '</div>';
         }
 
-        $auth_url = self::build_auth_url('link', get_permalink() ?: home_url('/'));
+        $redirect = get_permalink() ?: home_url('/');
         return '<div class="ett-el-shortcode-wrap">'
-             . self::button_html($auth_url, 'Link EVE Character')
+             . self::button_html('link', $redirect, 'Link EVE Character')
              . '</div>';
     }
 
