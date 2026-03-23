@@ -4,7 +4,7 @@ Tags: eve online, esi, sso, login, registration
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Requires Plugins: ett-price-helper
@@ -46,10 +46,16 @@ When enabled, `wp-login.php?action=register` is blocked and redirected, and the 
 
 == Changelog ==
 
+= 1.0.1 =
+* Fix: State token could be burned by speculative/prefetch page loads before the user clicked the SSO button, causing intermittent "invalid or expired state token" errors on login. Auth URL generation is now deferred to click time via an AJAX request instead of being baked into the page HTML at render time.
+
 = 1.0.0 =
 * Initial release.
 
 == Upgrade Notice ==
+
+= 1.0.1 =
+Fixes an intermittent "invalid or expired state token" error on login caused by browser prefetch or double page loads consuming the OAuth state before the user clicked the button.
 
 = 1.0.0 =
 Initial release.
